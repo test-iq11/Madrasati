@@ -57,7 +57,7 @@ jobs:
               raise SystemExit(
                   'ERROR: No ZIP file in repository ROOT. On GitHub open the '
                   'repository > Add file > Upload files, choose '
-                  'madrasati-flutter-v1.2.1.zip, then Commit changes. '
+                  'madrasati-flutter-v1.2.2.zip, then Commit changes. '
                   'Do not unzip it or put it inside a folder.')
           print('ZIP files found:', ', '.join(p.name for p in archives))
           valid = []
@@ -69,15 +69,15 @@ jobs:
                           print('Skipping', path.name, '- not the complete Madrasati source')
                           continue
                       spec = source.read('pubspec.yaml').decode('utf-8')
-                      if not re.search(r'^version:\s*1\.2\.1\+4\s*$', spec, re.M):
-                          print('Skipping', path.name, '- expected project version 1.2.1+4')
+                      if not re.search(r'^version:\s*1\.2\.2\+5\s*$', spec, re.M):
+                          print('Skipping', path.name, '- expected project version 1.2.2+5')
                           continue
                       valid.append(path)
               except (BadZipFile, UnicodeError, KeyError, OSError) as err:
                   print('Skipping', path.name, '-', err)
           if not valid:
               raise SystemExit('ERROR: ZIP files exist, but none is the correct '
-                               'complete Madrasati v1.2.1+4 Flutter project. '
+                               'complete Madrasati v1.2.2+5 Flutter project. '
                                'Upload the supplied project ZIP to repository root.')
           # Never silently select an old archive when multiple different
           # sources advertise the same version. Identical copies are harmless.
@@ -89,9 +89,9 @@ jobs:
               }
               if len(hashes) > 1:
                   raise SystemExit('ERROR: Multiple DIFFERENT Madrasati ZIPs '
-                                   'with version 1.2.1+4 in repository root. '
+                                   'with version 1.2.2+5 in repository root. '
                                    'Delete old duplicates and keep only the latest.')
-          preferred = [p for p in valid if p.name == 'madrasati-flutter-v1.2.1.zip']
+          preferred = [p for p in valid if p.name == 'madrasati-flutter-v1.2.2.zip']
           archive = preferred[0] if preferred else valid[0]
           if target.exists():
               raise SystemExit('ERROR: Build extraction directory already exists.')
@@ -278,7 +278,7 @@ jobs:
           test -s build/app/outputs/flutter-apk/app-release.apk
           unzip -tq build/app/outputs/flutter-apk/app-release.apk
           "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging build/app/outputs/flutter-apk/app-release.apk > "$RUNNER_TEMP/madrasati-apk-info.txt"
-          grep -F "package: name='iq.madrasati.school' versionCode='4' versionName='1.2.1'" "$RUNNER_TEMP/madrasati-apk-info.txt"
+          grep -F "package: name='iq.madrasati.school' versionCode='5' versionName='1.2.2'" "$RUNNER_TEMP/madrasati-apk-info.txt"
 
       - name: Run Android bell regression tests (AGP 9 debug variant)
         shell: bash
@@ -343,8 +343,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/deliverables"
-          cp "$PROJECT_DIR/build/app/outputs/flutter-apk/app-release.apk" "$RUNNER_TEMP/deliverables/Madrasati-v1.2.1.apk"
-          cp "$PROJECT_ARCHIVE" "$RUNNER_TEMP/deliverables/madrasati-flutter-v1.2.1.zip"
+          cp "$PROJECT_DIR/build/app/outputs/flutter-apk/app-release.apk" "$RUNNER_TEMP/deliverables/Madrasati-v1.2.2.apk"
+          cp "$PROJECT_ARCHIVE" "$RUNNER_TEMP/deliverables/madrasati-flutter-v1.2.2.zip"
           cp "$RUNNER_TEMP/madrasati-apk-info.txt" "$RUNNER_TEMP/deliverables/"
           cp "$PROJECT_DIR/pubspec.lock" "$RUNNER_TEMP/deliverables/resolved-pubspec.lock"
 
@@ -361,12 +361,12 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: madrasati-v1.2.1-failure-logs
+          name: madrasati-v1.2.2-failure-logs
           path: ${{ runner.temp }}/madrasati-ci-logs/
           if-no-files-found: ignore
 
       - uses: actions/upload-artifact@v4
         with:
-          name: madrasati-v1.2.1-android
+          name: madrasati-v1.2.2-android
           path: ${{ runner.temp }}/deliverables/
           if-no-files-found: error
