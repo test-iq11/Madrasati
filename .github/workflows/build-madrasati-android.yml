@@ -16,6 +16,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 55
     env:
+      EXPECTED_PROJECT_VERSION: '1.2.5+8'
       FLUTTER_VERSION: '3.50.0'
       NDK_VERSION: '28.2.13676358'
       LIBRARY_OWNER: ${{ vars.LIBRARY_OWNER || github.repository_owner }}
@@ -36,6 +37,7 @@ jobs:
           """Select one valid root-level ZIP without requiring an exact filename."""
           from pathlib import Path, PurePosixPath
           from zipfile import ZipFile, BadZipFile
+          import os
           import re
           import stat
           import sys
@@ -60,6 +62,8 @@ jobs:
                   'madrasati-flutter-v1.2.5.zip, then Commit changes. '
                   'Do not unzip it or put it inside a folder.')
           print('ZIP files found:', ', '.join(p.name for p in archives))
+          expected_version = os.environ['EXPECTED_PROJECT_VERSION']
+          expected_archive = f'madrasati-flutter-v{expected_version.split("+", 1)[0]}.zip'
           valid = []
           for path in archives:
               try:
@@ -69,16 +73,19 @@ jobs:
                           print('Skipping', path.name, '- not the complete Madrasati source')
                           continue
                       spec = source.read('pubspec.yaml').decode('utf-8')
-                      if not re.search(r'^version:\s*1\.2\.4\+7\s*$', spec, re.M):
-                          print('Skipping', path.name, '- expected project version 1.2.5+8')
+                      version = re.search(r'^version:\s*(\S+)\s*$', spec, re.M)
+                      actual_version = version.group(1) if version else '(missing)'
+                      if actual_version != expected_version:
+                          print('Skipping', path.name, '- expected project version',
+                                expected_version, 'but found', actual_version)
                           continue
                       valid.append(path)
               except (BadZipFile, UnicodeError, KeyError, OSError) as err:
                   print('Skipping', path.name, '-', err)
           if not valid:
-              raise SystemExit('ERROR: ZIP files exist, but none is the correct '
-                               'complete Madrasati v1.2.5+8 Flutter project. '
-                               'Upload the supplied project ZIP to repository root.')
+              raise SystemExit('ERROR: ZIP files exist, but none contains the complete '
+                               f'Madrasati {expected_version} Flutter project. '
+                               'Confirm the source version inside pubspec.yaml.')
           # Never silently select an old archive when multiple different
           # sources advertise the same version. Identical copies are harmless.
           if len(valid) > 1:
@@ -89,9 +96,9 @@ jobs:
               }
               if len(hashes) > 1:
                   raise SystemExit('ERROR: Multiple DIFFERENT Madrasati ZIPs '
-                                   'with version 1.2.5+8 in repository root. '
+                                   f'with version {expected_version} in repository root. '
                                    'Delete old duplicates and keep only the latest.')
-          preferred = [p for p in valid if p.name == 'madrasati-flutter-v1.2.5.zip']
+          preferred = [p for p in valid if p.name == expected_archive]
           archive = preferred[0] if preferred else valid[0]
           if target.exists():
               raise SystemExit('ERROR: Build extraction directory already exists.')
