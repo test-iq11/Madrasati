@@ -16,7 +16,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 55
     env:
-      PROJECT_DIR: ${{ runner.temp }}/madrasati-flutter
       FLUTTER_VERSION: '3.50.0'
       NDK_VERSION: '28.2.13676358'
       LIBRARY_OWNER: ${{ vars.LIBRARY_OWNER }}
@@ -29,6 +28,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          PROJECT_DIR="$RUNNER_TEMP/madrasati-flutter"
+          printf 'PROJECT_DIR=%s\n' "$PROJECT_DIR" >> "$GITHUB_ENV"
           python3 - "$GITHUB_WORKSPACE/madrasati-flutter-v1.0.0.zip" "$PROJECT_DIR" <<'PY'
           """Extract and validate the release source archive on the Actions runner."""
           from pathlib import Path, PurePosixPath
