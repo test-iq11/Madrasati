@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 55
     env:
-      EXPECTED_PROJECT_VERSION: '1.2.5+8'
+      EXPECTED_PROJECT_VERSION: '1.2.7+10'
       FLUTTER_VERSION: '3.50.0'
       NDK_VERSION: '28.2.13676358'
       LIBRARY_OWNER: ${{ vars.LIBRARY_OWNER || github.repository_owner }}
@@ -59,7 +59,7 @@ jobs:
               raise SystemExit(
                   'ERROR: No ZIP file in repository ROOT. On GitHub open the '
                   'repository > Add file > Upload files, choose '
-                  'madrasati-flutter-v1.2.5.zip, then Commit changes. '
+                  'madrasati-flutter-v1.2.7.zip, then Commit changes. '
                   'Do not unzip it or put it inside a folder.')
           print('ZIP files found:', ', '.join(p.name for p in archives))
           expected_version = os.environ['EXPECTED_PROJECT_VERSION']
@@ -240,7 +240,7 @@ jobs:
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/madrasati-ci-logs"
           cd "$PROJECT_DIR"
-          flutter test --no-pub --reporter expanded test/security_store_test.dart 2>&1 | tee "$RUNNER_TEMP/madrasati-ci-logs/admin-pin-tests.log"
+          flutter test --no-pub --reporter expanded test/security_store_test.dart test/app_lock_gate_test.dart 2>&1 | tee "$RUNNER_TEMP/madrasati-ci-logs/admin-pin-tests.log"
 
       - name: Verify Sajli student dialogs and grade restoration FIRST
         shell: bash
@@ -263,6 +263,7 @@ jobs:
           flutter pub get 2>&1 | tee "$RUNNER_TEMP/madrasati-ci-logs/library-pub-get.log"
           flutter test --reporter expanded \
             test/github_manager_verifier_test.dart \
+            test/github_manager_storage_test.dart \
             test/catalog_test.dart \
             test/catalog_merge_test.dart \
             2>&1 | tee "$RUNNER_TEMP/madrasati-ci-logs/library-manager-access.log"
@@ -306,7 +307,7 @@ jobs:
           test -s build/app/outputs/flutter-apk/app-release.apk
           unzip -tq build/app/outputs/flutter-apk/app-release.apk
           "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging build/app/outputs/flutter-apk/app-release.apk > "$RUNNER_TEMP/madrasati-apk-info.txt"
-          grep -F "package: name='iq.madrasati.school' versionCode='8' versionName='1.2.5'" "$RUNNER_TEMP/madrasati-apk-info.txt"
+          grep -F "package: name='iq.madrasati.school' versionCode='10' versionName='1.2.7'" "$RUNNER_TEMP/madrasati-apk-info.txt"
 
       - name: Run Android bell regression tests (AGP 9 debug variant)
         shell: bash
@@ -371,8 +372,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/deliverables"
-          cp "$PROJECT_DIR/build/app/outputs/flutter-apk/app-release.apk" "$RUNNER_TEMP/deliverables/Madrasati-v1.2.5.apk"
-          cp "$PROJECT_ARCHIVE" "$RUNNER_TEMP/deliverables/madrasati-flutter-v1.2.5.zip"
+          cp "$PROJECT_DIR/build/app/outputs/flutter-apk/app-release.apk" "$RUNNER_TEMP/deliverables/Madrasati-v1.2.7.apk"
+          cp "$PROJECT_ARCHIVE" "$RUNNER_TEMP/deliverables/madrasati-flutter-v1.2.7.zip"
           cp "$RUNNER_TEMP/madrasati-apk-info.txt" "$RUNNER_TEMP/deliverables/"
           cp "$PROJECT_DIR/pubspec.lock" "$RUNNER_TEMP/deliverables/resolved-pubspec.lock"
 
@@ -389,12 +390,12 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: madrasati-v1.2.5-failure-logs
+          name: madrasati-v1.2.7-failure-logs
           path: ${{ runner.temp }}/madrasati-ci-logs/
           if-no-files-found: ignore
 
       - uses: actions/upload-artifact@v4
         with:
-          name: madrasati-v1.2.5-android
+          name: madrasati-v1.2.7-android
           path: ${{ runner.temp }}/deliverables/
           if-no-files-found: error
