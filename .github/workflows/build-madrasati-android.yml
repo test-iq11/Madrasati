@@ -121,6 +121,39 @@ jobs:
           cd "$PROJECT_DIR"
           python3 ci/check_source.py
 
+      - name: Configure Maven Central mirror in extracted source (HTTP 429 protection)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$PROJECT_DIR"
+          python3 - <<'PYMIRROR'
+          from pathlib import Path
+
+          mirror = 'https://maven-central-eu.storage-download.googleapis.com/maven2/'
+          files = {
+              'android/settings.gradle': (
+                  '        google()\n        mavenCentral()\n        gradlePluginPortal()',
+                  '        maven { url = uri("' + mirror + '") }\n'
+                  '        google()\n        mavenCentral()\n        gradlePluginPortal()'),
+              'android/build.gradle': (
+                  '        google()\n        mavenCentral()',
+                  '        maven { url = uri("' + mirror + '") }\n'
+                  '        google()\n        mavenCentral()'),
+          }
+          for filename, (old, new) in files.items():
+              path = Path(filename)
+              content = path.read_text(encoding='utf-8')
+              if mirror not in content:
+                  if content.count(old) != 1:
+                      raise SystemExit('ERROR: Cannot safely configure Maven mirror in ' + filename)
+                  path.write_text(content.replace(old, new, 1), encoding='utf-8')
+              if content.count('mavenCentral()') != 1:
+                  raise SystemExit('ERROR: Unexpected Maven Central repository configuration in ' + filename)
+              updated = path.read_text(encoding='utf-8')
+              assert updated.index(mirror) < updated.index('mavenCentral()'), filename
+              print('Maven mirror configured before Central in', filename)
+          PYMIRROR
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -134,6 +167,13 @@ jobs:
           channel: stable
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
+
+      # Save/restore Gradle dependencies between ephemeral GitHub-hosted runners.
+      # Basic provider is powered by GitHub Actions cache and avoids redundant Maven requests.
+      - name: Set up Gradle dependency cache
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-provider: basic
 
       - name: Install and verify Android SDK packages
         shell: bash
@@ -197,7 +237,7 @@ jobs:
           cd android
           mkdir -p "$RUNNER_TEMP/madrasati-ci-logs"
           ./gradlew --no-daemon --version
-          ./gradlew --no-daemon :app:tasks --all --stacktrace 2>&1 | tee "$RUNNER_TEMP/madrasati-ci-logs/gradle-tasks.log"
+          # Do not enumerate every task here: avoid unnecessary Maven requests.
           # AGP 9 registers unit tests for the tested (normally debug) variant.
           # A dry-run verifies task existence and the dependency graph without running tests.
           ./gradlew --no-daemon :app:testDebugUnitTest --dry-run --stacktrace 2>&1 | tee "$RUNNER_TEMP/madrasati-ci-logs/android-test-dry-run.log"
@@ -288,6 +328,15 @@ jobs:
           cp "$PROJECT_ARCHIVE" "$RUNNER_TEMP/deliverables/madrasati-flutter-v1.1.0.zip"
           cp "$RUNNER_TEMP/madrasati-apk-info.txt" "$RUNNER_TEMP/deliverables/"
           cp "$PROJECT_DIR/pubspec.lock" "$RUNNER_TEMP/deliverables/resolved-pubspec.lock"
+
+      - name: Diagnose Maven Central HTTP 429 (only on failure)
+        if: failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -r -E -q 'status code 429|Too Many Requests' "$RUNNER_TEMP/madrasati-ci-logs" 2>/dev/null; then
+            echo '::error::Maven returned HTTP 429, a remote rate limit. Maven mirror and Gradle cache are enabled. This is not a Dart or Kotlin compilation error.'
+          fi
 
       - name: Upload diagnostic logs on failure
         if: failure()
