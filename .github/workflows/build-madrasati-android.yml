@@ -168,12 +168,19 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
 
-      # Save/restore Gradle dependencies between ephemeral GitHub-hosted runners.
-      # Basic provider is powered by GitHub Actions cache and avoids redundant Maven requests.
-      - name: Set up Gradle dependency cache
-        uses: gradle/actions/setup-gradle@v6
+      # ZIP-only repository: there are NO Gradle build files in GITHUB_WORKSPACE.
+      # setup-gradle@v6 with basic caching hashes **/*.gradle* at the repository
+      # root and fails before Gradle starts. Cache by ZIP bytes instead.
+      # The already-extracted Gradle project is under RUNNER_TEMP, not the repository.
+      - name: Cache extracted project's Gradle downloads (ZIP-safe)
+        uses: actions/cache@v4
         with:
-          cache-provider: basic
+          path: |
+            ~/.gradle/caches/modules-2
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-madrasati-gradle-zip-v2-${{ hashFiles('*.zip') }}
+          restore-keys: |
+            ${{ runner.os }}-madrasati-gradle-zip-v2-
 
       - name: Install and verify Android SDK packages
         shell: bash
