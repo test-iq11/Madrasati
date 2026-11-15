@@ -154,33 +154,7 @@ jobs:
           ./gradlew --no-daemon --version
           ./gradlew --no-daemon :app:tasks --all --stacktrace
 
-      - name: Analyze unified Flutter source
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$PROJECT_DIR"
-          flutter analyze --no-pub --no-fatal-infos lib test
-          flutter analyze --no-pub --no-fatal-infos modules/jadwali/lib modules/bell/lib modules/sajli/lib modules/scanner/lib modules/library/lib
-
-      - name: Test shared school workflows
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$PROJECT_DIR"
-          flutter test --no-pub
-
-      - name: Test original scheduling, reports, scanner and notification logic
-        shell: bash
-        run: |
-          set -euo pipefail
-          for module in jadwali sajli scanner library bell; do
-            (
-              cd "$PROJECT_DIR/modules/$module"
-              if [[ -d test ]]; then flutter test; fi
-            )
-          done
-
-      - name: Build unified release APK
+      - name: Build release APK early (catch native Java and Kotlin errors before lengthy tests)
         shell: bash
         run: |
           set -euo pipefail
@@ -189,21 +163,48 @@ jobs:
             echo 'Set both LIBRARY_OWNER and LIBRARY_REPO, or leave both empty to use the bundled catalog.'
             exit 1
           fi
+          mkdir -p "$RUNNER_TEMP/madrasati-ci-logs"
           flutter build apk --release --no-pub \
             --dart-define="LIBRARY_OWNER=$LIBRARY_OWNER" \
             --dart-define="LIBRARY_REPO=$LIBRARY_REPO" \
-            --dart-define="LIBRARY_BRANCH=$LIBRARY_BRANCH"
+            --dart-define="LIBRARY_BRANCH=$LIBRARY_BRANCH" 2>&1 | tee "$RUNNER_TEMP/madrasati-ci-logs/apk-build.log"
           test -s build/app/outputs/flutter-apk/app-release.apk
           unzip -tq build/app/outputs/flutter-apk/app-release.apk
           "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging build/app/outputs/flutter-apk/app-release.apk > "$RUNNER_TEMP/madrasati-apk-info.txt"
           grep -F "package: name='iq.madrasati.school' versionCode='1' versionName='1.0.0'" "$RUNNER_TEMP/madrasati-apk-info.txt"
+
+      - name: Analyze unified Flutter source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$PROJECT_DIR"
+          flutter analyze --no-pub --no-fatal-infos lib test 2>&1 | tee "$RUNNER_TEMP/madrasati-ci-logs/analyze-root.log"
+          flutter analyze --no-pub --no-fatal-infos modules/jadwali/lib modules/bell/lib modules/sajli/lib modules/scanner/lib modules/library/lib 2>&1 | tee "$RUNNER_TEMP/madrasati-ci-logs/analyze-modules.log"
+
+      - name: Test shared school workflows
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$PROJECT_DIR"
+          flutter test --no-pub 2>&1 | tee "$RUNNER_TEMP/madrasati-ci-logs/shared-tests.log"
+
+      - name: Test original scheduling, reports, scanner and notification logic
+        shell: bash
+        run: |
+          set -euo pipefail
+          for module in jadwali sajli scanner library bell; do
+            (
+              cd "$PROJECT_DIR/modules/$module"
+              if [[ -d test ]]; then flutter test 2>&1 | tee "$RUNNER_TEMP/madrasati-ci-logs/$module-tests.log"; fi
+            )
+          done
 
       - name: Run Android bell regression tests
         shell: bash
         run: |
           set -euo pipefail
           cd "$PROJECT_DIR/android"
-          ./gradlew --no-daemon :app:testReleaseUnitTest
+          ./gradlew --no-daemon :app:testReleaseUnitTest 2>&1 | tee "$RUNNER_TEMP/madrasati-ci-logs/android-tests.log"
 
       - name: Prepare verified downloads
         shell: bash
@@ -214,6 +215,14 @@ jobs:
           cp "$GITHUB_WORKSPACE/madrasati-flutter-v1.0.0.zip" "$RUNNER_TEMP/deliverables/"
           cp "$RUNNER_TEMP/madrasati-apk-info.txt" "$RUNNER_TEMP/deliverables/"
           cp "$PROJECT_DIR/pubspec.lock" "$RUNNER_TEMP/deliverables/resolved-pubspec.lock"
+
+      - name: Upload diagnostic logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: madrasati-v1.0.0-failure-logs
+          path: ${{ runner.temp }}/madrasati-ci-logs/
+          if-no-files-found: ignore
 
       - uses: actions/upload-artifact@v4
         with:
