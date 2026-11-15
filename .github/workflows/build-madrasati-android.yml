@@ -136,6 +136,24 @@ jobs:
           flutter pub get
           flutter pub deps --style=compact
 
+      - name: Check Android Gradle configuration before long tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$PROJECT_DIR"
+          python3 - <<'PYCODE'
+          import os
+          import shutil
+          from pathlib import Path
+          flutter = Path(shutil.which('flutter')).resolve().parent.parent
+          sdk = Path(os.environ['ANDROID_HOME']).resolve()
+          Path('android/local.properties').write_text(
+              f'sdk.dir={sdk}\nflutter.sdk={flutter}\n', encoding='utf-8')
+          PYCODE
+          cd android
+          ./gradlew --no-daemon --version
+          ./gradlew --no-daemon :app:tasks --all --stacktrace
+
       - name: Analyze unified Flutter source
         shell: bash
         run: |
