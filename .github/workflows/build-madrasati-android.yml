@@ -82,6 +82,9 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: Set up Android command-line tools
+        uses: android-actions/setup-android@v4
+
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
@@ -93,10 +96,36 @@ jobs:
         run: |
           set -euo pipefail
           flutter --version
-          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;$NDK_VERSION"
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          if [[ -z "$SDK_ROOT" || ! -d "$SDK_ROOT" ]]; then
+            echo "::error::Android SDK directory is missing after Android setup."
+            exit 1
+          fi
+
+          SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          if [[ ! -x "$SDKMANAGER" ]]; then
+            SDKMANAGER="$(command -v sdkmanager || true)"
+          fi
+          if [[ ! -x "$SDKMANAGER" ]]; then
+            for candidate in "$SDK_ROOT"/cmdline-tools/*/bin/sdkmanager; do
+              if [[ -x "$candidate" ]]; then
+                SDKMANAGER="$candidate"
+                break
+              fi
+            done
+          fi
+          if [[ ! -x "$SDKMANAGER" ]]; then
+            echo "::error::sdkmanager is missing from PATH and $SDK_ROOT/cmdline-tools."
+            exit 1
+          fi
+
+          export ANDROID_HOME="$SDK_ROOT" ANDROID_SDK_ROOT="$SDK_ROOT"
+          printf 'ANDROID_HOME=%s\nANDROID_SDK_ROOT=%s\n' "$SDK_ROOT" "$SDK_ROOT" >> "$GITHUB_ENV"
+          "$SDKMANAGER" --sdk_root="$SDK_ROOT" --install "platforms;android-36" "build-tools;36.0.0" "ndk;$NDK_VERSION"
           test -s "$ANDROID_HOME/ndk/$NDK_VERSION/source.properties"
           grep -F "$NDK_VERSION" "$ANDROID_HOME/ndk/$NDK_VERSION/source.properties"
           test -s "$ANDROID_HOME/platforms/android-36/android.jar"
+          test -x "$ANDROID_HOME/build-tools/36.0.0/aapt"
           chmod +x "$PROJECT_DIR/android/gradlew"
 
       - name: Resolve the unified dependency graph
