@@ -235,6 +235,19 @@ jobs:
           flutter pub get
           flutter pub deps --style=compact
 
+      - name: Verify approved premium Flutter homepage and navigation FIRST
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/madrasati-ci-logs"
+          cd "$PROJECT_DIR"
+          flutter test --no-pub --reporter expanded \
+            test/mosaic_home_test.dart \
+            test/navigation_palette_test.dart \
+            test/modern_preview_test.dart \
+            test/day_cards_test.dart \
+            2>&1 | tee "$RUNNER_TEMP/madrasati-ci-logs/approved-ui-tests.log"
+
       - name: Verify administrator PIN recovery and security guards FIRST
         shell: bash
         run: |
