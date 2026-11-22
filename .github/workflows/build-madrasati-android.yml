@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 55
     env:
-      EXPECTED_PROJECT_VERSION: '1.3.8+23'
+      EXPECTED_PROJECT_VERSION: '1.3.9+24'
       FLUTTER_VERSION: '3.50.0'
       NDK_VERSION: '28.2.13676358'
       LIBRARY_OWNER: ${{ vars.LIBRARY_OWNER || github.repository_owner }}
@@ -60,7 +60,7 @@ jobs:
               raise SystemExit(
                   'ERROR: No ZIP file in repository ROOT. On GitHub open the '
                   'repository > Add file > Upload files, choose '
-                  'madrasati-flutter-v1.3.8.zip, then Commit changes. '
+                  'madrasati-flutter-v1.3.9.zip, then Commit changes. '
                   'Do not unzip it or put it inside a folder.')
           print('ZIP files found:', ', '.join(p.name for p in archives))
           expected_version = os.environ['EXPECTED_PROJECT_VERSION']
@@ -128,6 +128,8 @@ jobs:
           PY
           cd "$PROJECT_DIR"
           python3 ci/check_source.py
+          python3 ci/check_dart_syntax_shape.py
+          python3 ci/unified_regression_audit.py
 
       - name: Configure Maven Central mirror in extracted source (HTTP 429 protection)
         shell: bash
@@ -245,6 +247,7 @@ jobs:
             test/mosaic_home_test.dart \
             test/navigation_palette_test.dart \
             test/modern_preview_test.dart \
+            test/unified_design_test.dart \
             test/day_cards_test.dart \
             test/school_statistics_grid_test.dart \
             2>&1 | tee "$RUNNER_TEMP/madrasati-ci-logs/approved-ui-tests.log"
@@ -314,7 +317,7 @@ jobs:
           flutter analyze --no-pub --no-fatal-infos lib test 2>&1 | tee "$RUNNER_TEMP/madrasati-ci-logs/analyze-root.log"
           flutter analyze --no-pub --no-fatal-infos modules/jadwali/lib modules/bell/lib modules/sajli/lib modules/scanner/lib modules/library/lib modules/card_settings/lib 2>&1 | tee "$RUNNER_TEMP/madrasati-ci-logs/analyze-modules.log"
 
-      - name: Build release APK early (catch native Java and Kotlin errors before lengthy tests)
+      - name: Build APK and verify signing mode (release or clearly labelled QA)
         env:
           MADRASATI_KEYSTORE_B64: ${{ secrets.MADRASATI_KEYSTORE_B64 }}
           MADRASATI_STORE_PASSWORD: ${{ secrets.MADRASATI_STORE_PASSWORD }}
@@ -324,11 +327,11 @@ jobs:
         run: |
           set -euo pipefail
           cd "$PROJECT_DIR"
+          mkdir -p "$RUNNER_TEMP/madrasati-ci-logs"
           if [[ -n "$LIBRARY_OWNER" && -z "$LIBRARY_REPO" ]] || [[ -z "$LIBRARY_OWNER" && -n "$LIBRARY_REPO" ]]; then
             echo 'Set both LIBRARY_OWNER and LIBRARY_REPO, or leave both empty to use the bundled catalog.'
             exit 1
           fi
-          mkdir -p "$RUNNER_TEMP/madrasati-ci-logs"
           if [[ -n "${MADRASATI_KEYSTORE_B64}${MADRASATI_STORE_PASSWORD}${MADRASATI_KEY_ALIAS}${MADRASATI_KEY_PASSWORD}" ]]; then
             : "${MADRASATI_KEYSTORE_B64:?Missing release keystore}" "${MADRASATI_STORE_PASSWORD:?Missing store password}" "${MADRASATI_KEY_ALIAS:?Missing key alias}" "${MADRASATI_KEY_PASSWORD:?Missing key password}"
             export MADRASATI_RELEASE_STORE="$RUNNER_TEMP/madrasati-release.keystore"
@@ -336,16 +339,29 @@ jobs:
             trap 'rm -f "$MADRASATI_RELEASE_STORE"' EXIT
             printf '%s' "$MADRASATI_KEYSTORE_B64" | base64 --decode > "$MADRASATI_RELEASE_STORE"
             unset MADRASATI_KEYSTORE_B64
+            echo 'Building installable RELEASE APK signed with the configured stable keystore.'
+            flutter build apk --release --no-pub \
+              --dart-define="LIBRARY_OWNER=$LIBRARY_OWNER" \
+              --dart-define="LIBRARY_REPO=$LIBRARY_REPO" \
+              --dart-define="LIBRARY_BRANCH=$LIBRARY_BRANCH" 2>&1 | tee "$RUNNER_TEMP/madrasati-ci-logs/apk-build.log"
+            BUILD_KIND='release'
+            APK_PATH='build/app/outputs/flutter-apk/app-release.apk'
+          else
+            echo '::warning::No stable release keystore configured. Building a DEBUG QA APK only. This is NOT a release and its signature might change on another runner.'
+            flutter build apk --debug --no-pub \
+              --dart-define="LIBRARY_OWNER=$LIBRARY_OWNER" \
+              --dart-define="LIBRARY_REPO=$LIBRARY_REPO" \
+              --dart-define="LIBRARY_BRANCH=$LIBRARY_BRANCH" 2>&1 | tee "$RUNNER_TEMP/madrasati-ci-logs/apk-build.log"
+            BUILD_KIND='debug-test'
+            APK_PATH='build/app/outputs/flutter-apk/app-debug.apk'
           fi
-          flutter build apk --release --no-pub \
-            --dart-define="LIBRARY_OWNER=$LIBRARY_OWNER" \
-            --dart-define="LIBRARY_REPO=$LIBRARY_REPO" \
-            --dart-define="LIBRARY_BRANCH=$LIBRARY_BRANCH" 2>&1 | tee "$RUNNER_TEMP/madrasati-ci-logs/apk-build.log"
-          test -s build/app/outputs/flutter-apk/app-release.apk
-          unzip -tq build/app/outputs/flutter-apk/app-release.apk
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging build/app/outputs/flutter-apk/app-release.apk > "$RUNNER_TEMP/madrasati-apk-info.txt"
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs build/app/outputs/flutter-apk/app-release.apk > "$RUNNER_TEMP/madrasati-signing.txt"
-          grep -F "package: name='iq.madrasati.school' versionCode='23' versionName='1.3.8'" "$RUNNER_TEMP/madrasati-apk-info.txt"
+          test -s "$APK_PATH"
+          unzip -tq "$APK_PATH"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK_PATH" > "$RUNNER_TEMP/madrasati-apk-info.txt"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$APK_PATH" > "$RUNNER_TEMP/madrasati-signing.txt"
+          grep -F "package: name='iq.madrasati.school' versionCode='24' versionName='1.3.9'" "$RUNNER_TEMP/madrasati-apk-info.txt"
+          printf 'MADRASATI_BUILD_KIND=%s\nMADRASATI_APK_PATH=%s\n' "$BUILD_KIND" "$APK_PATH" >> "$GITHUB_ENV"
+          printf 'Signing mode: %s\nAPK: %s\n' "$BUILD_KIND" "$APK_PATH" > "$RUNNER_TEMP/madrasati-build-kind.txt"
 
       - name: Run Android bell regression tests (AGP 9 debug variant)
         shell: bash
@@ -402,8 +418,10 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/deliverables"
-          cp "$PROJECT_DIR/build/app/outputs/flutter-apk/app-release.apk" "$RUNNER_TEMP/deliverables/Madrasati-v1.3.8.apk"
-          cp "$PROJECT_ARCHIVE" "$RUNNER_TEMP/deliverables/madrasati-flutter-v1.3.8.zip"
+          test -n "${MADRASATI_APK_PATH:-}" && test -n "${MADRASATI_BUILD_KIND:-}"
+          cp "$PROJECT_DIR/$MADRASATI_APK_PATH" "$RUNNER_TEMP/deliverables/Madrasati-v1.3.9-${MADRASATI_BUILD_KIND}.apk"
+          cp "$RUNNER_TEMP/madrasati-build-kind.txt" "$RUNNER_TEMP/deliverables/"
+          cp "$PROJECT_ARCHIVE" "$RUNNER_TEMP/deliverables/madrasati-flutter-v1.3.9.zip"
           cp "$RUNNER_TEMP/madrasati-apk-info.txt" "$RUNNER_TEMP/deliverables/"
           cp "$RUNNER_TEMP/madrasati-signing.txt" "$RUNNER_TEMP/deliverables/"
           cp "$PROJECT_DIR/pubspec.lock" "$RUNNER_TEMP/deliverables/resolved-pubspec.lock"
@@ -421,12 +439,12 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: madrasati-v1.3.8-failure-logs
+          name: madrasati-v1.3.9-failure-logs
           path: ${{ runner.temp }}/madrasati-ci-logs/
           if-no-files-found: ignore
 
       - uses: actions/upload-artifact@v4
         with:
-          name: madrasati-v1.3.8-android
+          name: madrasati-v1.3.9-android
           path: ${{ runner.temp }}/deliverables/
           if-no-files-found: error
