@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 55
     env:
-      EXPECTED_PROJECT_VERSION: '1.4.0+25'
+      EXPECTED_PROJECT_VERSION: '1.4.1+26'
       FLUTTER_VERSION: '3.50.0'
       NDK_VERSION: '28.2.13676358'
       LIBRARY_OWNER: ${{ vars.LIBRARY_OWNER || github.repository_owner }}
@@ -60,7 +60,7 @@ jobs:
               raise SystemExit(
                   'ERROR: No ZIP file in repository ROOT. On GitHub open the '
                   'repository > Add file > Upload files, choose '
-                  'madrasati-flutter-v1.4.0.zip, then Commit changes. '
+                  'madrasati-flutter-v1.4.1.zip, then Commit changes. '
                   'Do not unzip it or put it inside a folder.')
           print('ZIP files found:', ', '.join(p.name for p in archives))
           expected_version = os.environ['EXPECTED_PROJECT_VERSION']
@@ -238,6 +238,7 @@ jobs:
           flutter pub deps --style=compact
 
       - name: Verify approved premium Flutter homepage and navigation FIRST
+        timeout-minutes: 15
         shell: bash
         run: |
           set -euo pipefail
@@ -359,7 +360,7 @@ jobs:
           unzip -tq "$APK_PATH"
           "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK_PATH" > "$RUNNER_TEMP/madrasati-apk-info.txt"
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$APK_PATH" > "$RUNNER_TEMP/madrasati-signing.txt"
-          grep -F "package: name='iq.madrasati.school' versionCode='25' versionName='1.4.0'" "$RUNNER_TEMP/madrasati-apk-info.txt"
+          grep -F "package: name='iq.madrasati.school' versionCode='26' versionName='1.4.1'" "$RUNNER_TEMP/madrasati-apk-info.txt"
           printf 'MADRASATI_BUILD_KIND=%s\nMADRASATI_APK_PATH=%s\n' "$BUILD_KIND" "$APK_PATH" >> "$GITHUB_ENV"
           printf 'Signing mode: %s\nAPK: %s\n' "$BUILD_KIND" "$APK_PATH" > "$RUNNER_TEMP/madrasati-build-kind.txt"
 
@@ -419,9 +420,9 @@ jobs:
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/deliverables"
           test -n "${MADRASATI_APK_PATH:-}" && test -n "${MADRASATI_BUILD_KIND:-}"
-          cp "$PROJECT_DIR/$MADRASATI_APK_PATH" "$RUNNER_TEMP/deliverables/Madrasati-v1.4.0-${MADRASATI_BUILD_KIND}.apk"
+          cp "$PROJECT_DIR/$MADRASATI_APK_PATH" "$RUNNER_TEMP/deliverables/Madrasati-v1.4.1-${MADRASATI_BUILD_KIND}.apk"
           cp "$RUNNER_TEMP/madrasati-build-kind.txt" "$RUNNER_TEMP/deliverables/"
-          cp "$PROJECT_ARCHIVE" "$RUNNER_TEMP/deliverables/madrasati-flutter-v1.4.0.zip"
+          cp "$PROJECT_ARCHIVE" "$RUNNER_TEMP/deliverables/madrasati-flutter-v1.4.1.zip"
           cp "$RUNNER_TEMP/madrasati-apk-info.txt" "$RUNNER_TEMP/deliverables/"
           cp "$RUNNER_TEMP/madrasati-signing.txt" "$RUNNER_TEMP/deliverables/"
           cp "$PROJECT_DIR/pubspec.lock" "$RUNNER_TEMP/deliverables/resolved-pubspec.lock"
@@ -439,12 +440,12 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: madrasati-v1.4.0-failure-logs
+          name: madrasati-v1.4.1-failure-logs
           path: ${{ runner.temp }}/madrasati-ci-logs/
           if-no-files-found: ignore
 
       - uses: actions/upload-artifact@v4
         with:
-          name: madrasati-v1.4.0-android
+          name: madrasati-v1.4.1-android
           path: ${{ runner.temp }}/deliverables/
           if-no-files-found: error
