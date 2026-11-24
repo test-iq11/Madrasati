@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 55
     env:
-      EXPECTED_PROJECT_VERSION: '1.4.3+28'
+      EXPECTED_PROJECT_VERSION: '1.4.4+29'
       FLUTTER_VERSION: '3.50.0'
       NDK_VERSION: '28.2.13676358'
       LIBRARY_OWNER: ${{ vars.LIBRARY_OWNER || github.repository_owner }}
@@ -60,7 +60,7 @@ jobs:
               raise SystemExit(
                   'ERROR: No ZIP file in repository ROOT. On GitHub open the '
                   'repository > Add file > Upload files, choose '
-                  'madrasati-flutter-v1.4.3.zip, then Commit changes. '
+                  'madrasati-flutter-v1.4.4.zip, then Commit changes. '
                   'Do not unzip it or put it inside a folder.')
           print('ZIP files found:', ', '.join(p.name for p in archives))
           expected_version = os.environ['EXPECTED_PROJECT_VERSION']
@@ -241,6 +241,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/madrasati-ci-logs"
           cd "$PROJECT_DIR"
           flutter analyze --no-pub --no-fatal-infos lib test 2>&1 | tee "$RUNNER_TEMP/madrasati-ci-logs/analyze-root-early.log"
 
@@ -324,7 +325,7 @@ jobs:
           cd "$PROJECT_DIR"
           flutter analyze --no-pub --no-fatal-infos modules/jadwali/lib modules/bell/lib modules/sajli/lib modules/scanner/lib modules/library/lib modules/card_settings/lib 2>&1 | tee "$RUNNER_TEMP/madrasati-ci-logs/analyze-modules.log"
 
-      - name: Build APK and verify signing mode (release or clearly labelled QA)
+      - name: Build ABI-specific APKs and verify signing mode (release or clearly labelled QA)
         env:
           MADRASATI_KEYSTORE_B64: ${{ secrets.MADRASATI_KEYSTORE_B64 }}
           MADRASATI_STORE_PASSWORD: ${{ secrets.MADRASATI_STORE_PASSWORD }}
@@ -334,7 +335,7 @@ jobs:
         run: |
           set -euo pipefail
           cd "$PROJECT_DIR"
-          mkdir -p "$RUNNER_TEMP/madrasati-ci-logs"
+          mkdir -p "$RUNNER_TEMP/madrasati-ci-logs" "$RUNNER_TEMP/deliverables"
           if [[ -n "$LIBRARY_OWNER" && -z "$LIBRARY_REPO" ]] || [[ -z "$LIBRARY_OWNER" && -n "$LIBRARY_REPO" ]]; then
             echo 'Set both LIBRARY_OWNER and LIBRARY_REPO, or leave both empty to use the bundled catalog.'
             exit 1
@@ -346,29 +347,48 @@ jobs:
             trap 'rm -f "$MADRASATI_RELEASE_STORE"' EXIT
             printf '%s' "$MADRASATI_KEYSTORE_B64" | base64 --decode > "$MADRASATI_RELEASE_STORE"
             unset MADRASATI_KEYSTORE_B64
-            echo 'Building installable RELEASE APK signed with the configured stable keystore.'
-            flutter build apk --release --no-pub \
+            echo 'Building ABI-specific RELEASE APKs signed with the configured stable keystore.'
+            flutter build apk --release --split-per-abi --no-pub \
               --dart-define="LIBRARY_OWNER=$LIBRARY_OWNER" \
               --dart-define="LIBRARY_REPO=$LIBRARY_REPO" \
               --dart-define="LIBRARY_BRANCH=$LIBRARY_BRANCH" 2>&1 | tee "$RUNNER_TEMP/madrasati-ci-logs/apk-build.log"
             BUILD_KIND='release'
-            APK_PATH='build/app/outputs/flutter-apk/app-release.apk'
+            APK_VARIANT='release'
           else
-            echo '::warning::No stable release keystore configured. Building a DEBUG QA APK only. This is NOT a release and its signature might change on another runner.'
-            flutter build apk --debug --no-pub \
+            echo '::warning::No stable release keystore configured. Building ABI-specific DEBUG QA APKs only. These are NOT releases and signatures may change on another runner.'
+            flutter build apk --debug --split-per-abi --no-pub \
               --dart-define="LIBRARY_OWNER=$LIBRARY_OWNER" \
               --dart-define="LIBRARY_REPO=$LIBRARY_REPO" \
               --dart-define="LIBRARY_BRANCH=$LIBRARY_BRANCH" 2>&1 | tee "$RUNNER_TEMP/madrasati-ci-logs/apk-build.log"
             BUILD_KIND='debug-test'
-            APK_PATH='build/app/outputs/flutter-apk/app-debug.apk'
+            APK_VARIANT='debug'
           fi
-          test -s "$APK_PATH"
-          unzip -tq "$APK_PATH"
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK_PATH" > "$RUNNER_TEMP/madrasati-apk-info.txt"
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$APK_PATH" > "$RUNNER_TEMP/madrasati-signing.txt"
-          grep -F "package: name='iq.madrasati.school' versionCode='28' versionName='1.4.3'" "$RUNNER_TEMP/madrasati-apk-info.txt"
-          printf 'MADRASATI_BUILD_KIND=%s\nMADRASATI_APK_PATH=%s\n' "$BUILD_KIND" "$APK_PATH" >> "$GITHUB_ENV"
-          printf 'Signing mode: %s\nAPK: %s\n' "$BUILD_KIND" "$APK_PATH" > "$RUNNER_TEMP/madrasati-build-kind.txt"
+
+          shopt -s nullglob
+          APK_FILES=(build/app/outputs/flutter-apk/app-*-${APK_VARIANT}.apk)
+          if [[ ${#APK_FILES[@]} -ne 3 ]]; then
+            printf 'Expected exactly 3 ABI APKs, found %s. Files: %s\n' "${#APK_FILES[@]}" "${APK_FILES[*]:-none}"
+            exit 1
+          fi
+          : > "$RUNNER_TEMP/madrasati-apk-size-report.txt"
+          for apk in "${APK_FILES[@]}"; do
+            test -s "$apk"
+            unzip -tq "$apk"
+            basename="$(basename "$apk")"
+            abi="${basename#app-}"
+            abi="${abi%-${APK_VARIANT}.apk}"
+            "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk" > "$RUNNER_TEMP/madrasati-apk-info-${abi}.txt"
+            "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$apk" > "$RUNNER_TEMP/madrasati-signing-${abi}.txt"
+            grep -F "package: name='iq.madrasati.school' versionCode='29' versionName='1.4.4'" "$RUNNER_TEMP/madrasati-apk-info-${abi}.txt"
+            cp "$apk" "$RUNNER_TEMP/deliverables/Madrasati-v1.4.4-${abi}-${BUILD_KIND}.apk"
+            cp "$RUNNER_TEMP/madrasati-apk-info-${abi}.txt" "$RUNNER_TEMP/deliverables/"
+            cp "$RUNNER_TEMP/madrasati-signing-${abi}.txt" "$RUNNER_TEMP/deliverables/"
+            bytes="$(stat -c '%s' "$apk")"
+            printf '%s  %s bytes\n' "$abi" "$bytes" | tee -a "$RUNNER_TEMP/madrasati-apk-size-report.txt"
+          done
+          cp "$RUNNER_TEMP/madrasati-apk-size-report.txt" "$RUNNER_TEMP/deliverables/"
+          printf 'Signing mode: %s\nOutput: three architecture-specific APKs (arm64-v8a, armeabi-v7a, x86_64).\n' "$BUILD_KIND" > "$RUNNER_TEMP/madrasati-build-kind.txt"
+          cp "$RUNNER_TEMP/madrasati-build-kind.txt" "$RUNNER_TEMP/deliverables/"
 
       - name: Run Android bell regression tests (AGP 9 debug variant)
         shell: bash
@@ -420,17 +440,12 @@ jobs:
             )
           done
 
-      - name: Prepare verified downloads
+      - name: Prepare verified source and dependency lockfile
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/deliverables"
-          test -n "${MADRASATI_APK_PATH:-}" && test -n "${MADRASATI_BUILD_KIND:-}"
-          cp "$PROJECT_DIR/$MADRASATI_APK_PATH" "$RUNNER_TEMP/deliverables/Madrasati-v1.4.3-${MADRASATI_BUILD_KIND}.apk"
-          cp "$RUNNER_TEMP/madrasati-build-kind.txt" "$RUNNER_TEMP/deliverables/"
-          cp "$PROJECT_ARCHIVE" "$RUNNER_TEMP/deliverables/madrasati-flutter-v1.4.3.zip"
-          cp "$RUNNER_TEMP/madrasati-apk-info.txt" "$RUNNER_TEMP/deliverables/"
-          cp "$RUNNER_TEMP/madrasati-signing.txt" "$RUNNER_TEMP/deliverables/"
+          cp "$PROJECT_ARCHIVE" "$RUNNER_TEMP/deliverables/madrasati-flutter-v1.4.4.zip"
           cp "$PROJECT_DIR/pubspec.lock" "$RUNNER_TEMP/deliverables/resolved-pubspec.lock"
 
       - name: Diagnose Maven Central HTTP 429 (only on failure)
@@ -446,12 +461,12 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: madrasati-v1.4.3-failure-logs
+          name: madrasati-v1.4.4-failure-logs
           path: ${{ runner.temp }}/madrasati-ci-logs/
           if-no-files-found: ignore
 
       - uses: actions/upload-artifact@v4
         with:
-          name: madrasati-v1.4.3-android
+          name: madrasati-v1.4.4-android
           path: ${{ runner.temp }}/deliverables/
           if-no-files-found: error
