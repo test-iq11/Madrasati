@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 55
     env:
-      EXPECTED_PROJECT_VERSION: '1.4.4+29'
+      EXPECTED_PROJECT_VERSION: '1.4.5+30'
       FLUTTER_VERSION: '3.50.0'
       NDK_VERSION: '28.2.13676358'
       LIBRARY_OWNER: ${{ vars.LIBRARY_OWNER || github.repository_owner }}
@@ -60,7 +60,7 @@ jobs:
               raise SystemExit(
                   'ERROR: No ZIP file in repository ROOT. On GitHub open the '
                   'repository > Add file > Upload files, choose '
-                  'madrasati-flutter-v1.4.4.zip, then Commit changes. '
+                  'madrasati-flutter-v1.4.5.zip, then Commit changes. '
                   'Do not unzip it or put it inside a folder.')
           print('ZIP files found:', ', '.join(p.name for p in archives))
           expected_version = os.environ['EXPECTED_PROJECT_VERSION']
@@ -379,8 +379,8 @@ jobs:
             abi="${abi%-${APK_VARIANT}.apk}"
             "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk" > "$RUNNER_TEMP/madrasati-apk-info-${abi}.txt"
             "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$apk" > "$RUNNER_TEMP/madrasati-signing-${abi}.txt"
-            grep -F "package: name='iq.madrasati.school' versionCode='29' versionName='1.4.4'" "$RUNNER_TEMP/madrasati-apk-info-${abi}.txt"
-            cp "$apk" "$RUNNER_TEMP/deliverables/Madrasati-v1.4.4-${abi}-${BUILD_KIND}.apk"
+            grep -F "package: name='iq.madrasati.school' versionCode='30' versionName='1.4.5'" "$RUNNER_TEMP/madrasati-apk-info-${abi}.txt"
+            cp "$apk" "$RUNNER_TEMP/deliverables/Madrasati-v1.4.5-${abi}-${BUILD_KIND}.apk"
             cp "$RUNNER_TEMP/madrasati-apk-info-${abi}.txt" "$RUNNER_TEMP/deliverables/"
             cp "$RUNNER_TEMP/madrasati-signing-${abi}.txt" "$RUNNER_TEMP/deliverables/"
             bytes="$(stat -c '%s' "$apk")"
@@ -445,7 +445,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/deliverables"
-          cp "$PROJECT_ARCHIVE" "$RUNNER_TEMP/deliverables/madrasati-flutter-v1.4.4.zip"
+          cp "$PROJECT_ARCHIVE" "$RUNNER_TEMP/deliverables/madrasati-flutter-v1.4.5.zip"
           cp "$PROJECT_DIR/pubspec.lock" "$RUNNER_TEMP/deliverables/resolved-pubspec.lock"
 
       - name: Diagnose Maven Central HTTP 429 (only on failure)
@@ -461,12 +461,12 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: madrasati-v1.4.4-failure-logs
+          name: madrasati-v1.4.5-failure-logs
           path: ${{ runner.temp }}/madrasati-ci-logs/
           if-no-files-found: ignore
 
       - uses: actions/upload-artifact@v4
         with:
-          name: madrasati-v1.4.4-android
+          name: madrasati-v1.4.5-android
           path: ${{ runner.temp }}/deliverables/
           if-no-files-found: error
