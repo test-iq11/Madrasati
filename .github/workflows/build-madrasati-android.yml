@@ -370,19 +370,79 @@ jobs:
             printf 'Expected exactly 3 ABI APKs, found %s. Files: %s\n' "${#APK_FILES[@]}" "${APK_FILES[*]:-none}"
             exit 1
           fi
+          BUILD_TOOLS_DIR="$ANDROID_HOME/build-tools/36.0.0"
+          AAPT="$BUILD_TOOLS_DIR/aapt"
+          AAPT2="$BUILD_TOOLS_DIR/aapt2"
+          APK_SIGNER="$BUILD_TOOLS_DIR/apksigner"
+          for tool in "$AAPT" "$AAPT2" "$APK_SIGNER"; do
+            if [[ ! -x "$tool" ]]; then
+              echo "::error::Required Android build tool is missing or not executable: $tool"
+              ls -lah "$BUILD_TOOLS_DIR" || true
+              exit 1
+            fi
+          done
           : > "$RUNNER_TEMP/madrasati-apk-size-report.txt"
           for apk in "${APK_FILES[@]}"; do
-            test -s "$apk"
-            unzip -tq "$apk"
             basename="$(basename "$apk")"
             abi="${basename#app-}"
             abi="${abi%-${APK_VARIANT}.apk}"
-            "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk" > "$RUNNER_TEMP/madrasati-apk-info-${abi}.txt"
-            "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$apk" > "$RUNNER_TEMP/madrasati-signing-${abi}.txt"
-            grep -F "package: name='iq.madrasati.school' versionCode='30' versionName='1.4.5'" "$RUNNER_TEMP/madrasati-apk-info-${abi}.txt"
+            info="$RUNNER_TEMP/madrasati-ci-logs/madrasati-apk-info-${abi}.txt"
+            info_error="$RUNNER_TEMP/madrasati-ci-logs/madrasati-apk-info-${abi}.err"
+            signing="$RUNNER_TEMP/madrasati-ci-logs/madrasati-signing-${abi}.txt"
+            signing_error="$RUNNER_TEMP/madrasati-ci-logs/madrasati-signing-${abi}.err"
+
+            echo "Checking APK archive integrity: $basename"
+            if [[ ! -s "$apk" ]] || ! unzip -tq "$apk"; then
+              echo "::error::APK is missing, empty, or has invalid ZIP contents: $apk"
+              exit 1
+            fi
+
+            echo "Reading APK manifest metadata for ABI: $abi"
+            if ! "$AAPT" dump badging "$apk" > "$info" 2> "$info_error"; then
+              echo "aapt failed; retrying with aapt2. Original diagnostic:"
+              cat "$info_error" || true
+              if ! "$AAPT2" dump badging "$apk" > "$info" 2> "$info_error"; then
+                echo "::error::Both aapt and aapt2 failed to read APK metadata for $abi."
+                cat "$info_error" || true
+                exit 1
+              fi
+            fi
+
+            echo "Verifying APK signature for ABI: $abi"
+            if ! "$APK_SIGNER" verify --verbose --print-certs "$apk" > "$signing" 2> "$signing_error"; then
+              echo "::error::APK signature verification failed for $abi."
+              cat "$signing_error" || true
+              cat "$signing" || true
+              exit 1
+            fi
+
+            echo "Validating package ID and version for ABI: $abi"
+            python3 - "$info" "$abi" <<'PYAPK'
+          from pathlib import Path
+          import re
+          import sys
+
+          info = Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
+          abi = sys.argv[2]
+          package_lines = [line for line in info.splitlines() if line.startswith('package:')]
+          print('APK package metadata:', package_lines[0] if package_lines else '(no package metadata line)')
+          if not package_lines:
+              raise SystemExit(f'ERROR: aapt output contains no package metadata for {abi}. Full output follows:\n{info}')
+          line = package_lines[0]
+          checks = {
+              'applicationId': (r"\bname='([^']+)'", 'iq.madrasati.school'),
+              'versionCode': (r"\bversionCode='([^']+)'", '30'),
+              'versionName': (r"\bversionName='([^']+)'", '1.4.5'),
+          }
+          for label, (pattern, expected) in checks.items():
+              match = re.search(pattern, line)
+              actual = match.group(1) if match else '(missing)'
+              if actual != expected:
+                  raise SystemExit(f'ERROR: {abi} APK {label} mismatch: expected {expected!r}, found {actual!r}.')
+          PYAPK
             cp "$apk" "$RUNNER_TEMP/deliverables/Madrasati-v1.4.5-${abi}-${BUILD_KIND}.apk"
-            cp "$RUNNER_TEMP/madrasati-apk-info-${abi}.txt" "$RUNNER_TEMP/deliverables/"
-            cp "$RUNNER_TEMP/madrasati-signing-${abi}.txt" "$RUNNER_TEMP/deliverables/"
+            cp "$info" "$RUNNER_TEMP/deliverables/"
+            cp "$signing" "$RUNNER_TEMP/deliverables/"
             bytes="$(stat -c '%s' "$apk")"
             printf '%s  %s bytes\n' "$abi" "$bytes" | tee -a "$RUNNER_TEMP/madrasati-apk-size-report.txt"
           done
