@@ -417,23 +417,41 @@ jobs:
             fi
 
             echo "Validating package ID and version for ABI: $abi"
-            python3 - "$info" "$abi" <<'PYAPK'
+            python3 - "$info" "$abi" "$EXPECTED_PROJECT_VERSION" <<'PYAPK'
           from pathlib import Path
           import re
           import sys
 
           info = Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
           abi = sys.argv[2]
+          project_version = sys.argv[3]
           package_lines = [line for line in info.splitlines() if line.startswith('package:')]
           print('APK package metadata:', package_lines[0] if package_lines else '(no package metadata line)')
           if not package_lines:
               raise SystemExit(f'ERROR: aapt output contains no package metadata for {abi}. Full output follows:\n{info}')
+
+          try:
+              base_version_code = int(project_version.rsplit('+', 1)[1])
+          except (IndexError, ValueError):
+              raise SystemExit(f'ERROR: invalid expected project version: {project_version!r}')
+
+          # Flutter adds a per-ABI offset for ABI-split APKs.
+          abi_version_offsets = {
+              'armeabi-v7a': 1000,
+              'arm64-v8a': 2000,
+              'x86_64': 4000,
+          }
+          if abi not in abi_version_offsets:
+              raise SystemExit(f'ERROR: unexpected APK ABI {abi!r}; cannot validate its versionCode.')
+          expected_abi_version_code = str(base_version_code + abi_version_offsets[abi])
+
           line = package_lines[0]
           checks = {
               'applicationId': (r"\bname='([^']+)'", 'iq.madrasati.school'),
-              'versionCode': (r"\bversionCode='([^']+)'", '30'),
-              'versionName': (r"\bversionName='([^']+)'", '1.4.5'),
+              'versionCode': (r"\bversionCode='([^']+)'", expected_abi_version_code),
+              'versionName': (r"\bversionName='([^']+)'", project_version.split('+', 1)[0]),
           }
+          print(f'Expected {abi} versionCode: {expected_abi_version_code} (base {base_version_code} + ABI offset {abi_version_offsets[abi]}).')
           for label, (pattern, expected) in checks.items():
               match = re.search(pattern, line)
               actual = match.group(1) if match else '(missing)'
