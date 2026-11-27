@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 55
     env:
-      EXPECTED_PROJECT_VERSION: '1.4.5+30'
+      EXPECTED_PROJECT_VERSION: '1.3.9+24'
       FLUTTER_VERSION: '3.50.0'
       NDK_VERSION: '28.2.13676358'
       LIBRARY_OWNER: ${{ vars.LIBRARY_OWNER || github.repository_owner }}
@@ -60,7 +60,7 @@ jobs:
               raise SystemExit(
                   'ERROR: No ZIP file in repository ROOT. On GitHub open the '
                   'repository > Add file > Upload files, choose '
-                  'madrasati-flutter-v1.4.5.zip, then Commit changes. '
+                  'madrasati-flutter-v1.3.9.zip, then Commit changes. '
                   'Do not unzip it or put it inside a folder.')
           print('ZIP files found:', ', '.join(p.name for p in archives))
           expected_version = os.environ['EXPECTED_PROJECT_VERSION']
@@ -128,8 +128,6 @@ jobs:
           PY
           cd "$PROJECT_DIR"
           python3 ci/check_source.py
-          python3 ci/check_dart_syntax_shape.py
-          python3 ci/unified_regression_audit.py
 
       - name: Configure Maven Central mirror in extracted source (HTTP 429 protection)
         shell: bash
@@ -237,16 +235,7 @@ jobs:
           flutter pub get
           flutter pub deps --style=compact
 
-      - name: Compile-check root Flutter source and widget tests before running them
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/madrasati-ci-logs"
-          cd "$PROJECT_DIR"
-          flutter analyze --no-pub --no-fatal-infos lib test 2>&1 | tee "$RUNNER_TEMP/madrasati-ci-logs/analyze-root-early.log"
-
       - name: Verify approved premium Flutter homepage and navigation FIRST
-        timeout-minutes: 15
         shell: bash
         run: |
           set -euo pipefail
@@ -256,7 +245,6 @@ jobs:
             test/mosaic_home_test.dart \
             test/navigation_palette_test.dart \
             test/modern_preview_test.dart \
-            test/unified_design_test.dart test/unified_no_legacy_navigation_test.dart \
             test/day_cards_test.dart \
             test/school_statistics_grid_test.dart \
             2>&1 | tee "$RUNNER_TEMP/madrasati-ci-logs/approved-ui-tests.log"
@@ -318,14 +306,15 @@ jobs:
           # A dry-run verifies task existence and the dependency graph without running tests.
           ./gradlew --no-daemon :app:testDebugUnitTest --dry-run --stacktrace 2>&1 | tee "$RUNNER_TEMP/madrasati-ci-logs/android-test-dry-run.log"
 
-      - name: Analyze Flutter feature modules after dependency setup
+      - name: Analyze unified Flutter source
         shell: bash
         run: |
           set -euo pipefail
           cd "$PROJECT_DIR"
+          flutter analyze --no-pub --no-fatal-infos lib test 2>&1 | tee "$RUNNER_TEMP/madrasati-ci-logs/analyze-root.log"
           flutter analyze --no-pub --no-fatal-infos modules/jadwali/lib modules/bell/lib modules/sajli/lib modules/scanner/lib modules/library/lib modules/card_settings/lib 2>&1 | tee "$RUNNER_TEMP/madrasati-ci-logs/analyze-modules.log"
 
-      - name: Build ABI-specific APKs and verify signing mode (release or clearly labelled QA)
+      - name: Build release APK early (catch native Java and Kotlin errors before lengthy tests)
         env:
           MADRASATI_KEYSTORE_B64: ${{ secrets.MADRASATI_KEYSTORE_B64 }}
           MADRASATI_STORE_PASSWORD: ${{ secrets.MADRASATI_STORE_PASSWORD }}
@@ -335,11 +324,11 @@ jobs:
         run: |
           set -euo pipefail
           cd "$PROJECT_DIR"
-          mkdir -p "$RUNNER_TEMP/madrasati-ci-logs" "$RUNNER_TEMP/deliverables"
           if [[ -n "$LIBRARY_OWNER" && -z "$LIBRARY_REPO" ]] || [[ -z "$LIBRARY_OWNER" && -n "$LIBRARY_REPO" ]]; then
             echo 'Set both LIBRARY_OWNER and LIBRARY_REPO, or leave both empty to use the bundled catalog.'
             exit 1
           fi
+          mkdir -p "$RUNNER_TEMP/madrasati-ci-logs"
           if [[ -n "${MADRASATI_KEYSTORE_B64}${MADRASATI_STORE_PASSWORD}${MADRASATI_KEY_ALIAS}${MADRASATI_KEY_PASSWORD}" ]]; then
             : "${MADRASATI_KEYSTORE_B64:?Missing release keystore}" "${MADRASATI_STORE_PASSWORD:?Missing store password}" "${MADRASATI_KEY_ALIAS:?Missing key alias}" "${MADRASATI_KEY_PASSWORD:?Missing key password}"
             export MADRASATI_RELEASE_STORE="$RUNNER_TEMP/madrasati-release.keystore"
@@ -347,126 +336,16 @@ jobs:
             trap 'rm -f "$MADRASATI_RELEASE_STORE"' EXIT
             printf '%s' "$MADRASATI_KEYSTORE_B64" | base64 --decode > "$MADRASATI_RELEASE_STORE"
             unset MADRASATI_KEYSTORE_B64
-            echo 'Building ABI-specific RELEASE APKs signed with the configured stable keystore.'
-            flutter build apk --release --split-per-abi --no-pub \
-              --dart-define="LIBRARY_OWNER=$LIBRARY_OWNER" \
-              --dart-define="LIBRARY_REPO=$LIBRARY_REPO" \
-              --dart-define="LIBRARY_BRANCH=$LIBRARY_BRANCH" 2>&1 | tee "$RUNNER_TEMP/madrasati-ci-logs/apk-build.log"
-            BUILD_KIND='release'
-            APK_VARIANT='release'
-          else
-            echo '::warning::No stable release keystore configured. Building ABI-specific DEBUG QA APKs only. These are NOT releases and signatures may change on another runner.'
-            flutter build apk --debug --split-per-abi --no-pub \
-              --dart-define="LIBRARY_OWNER=$LIBRARY_OWNER" \
-              --dart-define="LIBRARY_REPO=$LIBRARY_REPO" \
-              --dart-define="LIBRARY_BRANCH=$LIBRARY_BRANCH" 2>&1 | tee "$RUNNER_TEMP/madrasati-ci-logs/apk-build.log"
-            BUILD_KIND='debug-test'
-            APK_VARIANT='debug'
           fi
-
-          shopt -s nullglob
-          APK_FILES=(build/app/outputs/flutter-apk/app-*-${APK_VARIANT}.apk)
-          if [[ ${#APK_FILES[@]} -ne 3 ]]; then
-            printf 'Expected exactly 3 ABI APKs, found %s. Files: %s\n' "${#APK_FILES[@]}" "${APK_FILES[*]:-none}"
-            exit 1
-          fi
-          BUILD_TOOLS_DIR="$ANDROID_HOME/build-tools/36.0.0"
-          AAPT="$BUILD_TOOLS_DIR/aapt"
-          AAPT2="$BUILD_TOOLS_DIR/aapt2"
-          APK_SIGNER="$BUILD_TOOLS_DIR/apksigner"
-          for tool in "$AAPT" "$AAPT2" "$APK_SIGNER"; do
-            if [[ ! -x "$tool" ]]; then
-              echo "::error::Required Android build tool is missing or not executable: $tool"
-              ls -lah "$BUILD_TOOLS_DIR" || true
-              exit 1
-            fi
-          done
-          : > "$RUNNER_TEMP/madrasati-apk-size-report.txt"
-          for apk in "${APK_FILES[@]}"; do
-            basename="$(basename "$apk")"
-            abi="${basename#app-}"
-            abi="${abi%-${APK_VARIANT}.apk}"
-            info="$RUNNER_TEMP/madrasati-ci-logs/madrasati-apk-info-${abi}.txt"
-            info_error="$RUNNER_TEMP/madrasati-ci-logs/madrasati-apk-info-${abi}.err"
-            signing="$RUNNER_TEMP/madrasati-ci-logs/madrasati-signing-${abi}.txt"
-            signing_error="$RUNNER_TEMP/madrasati-ci-logs/madrasati-signing-${abi}.err"
-
-            echo "Checking APK archive integrity: $basename"
-            if [[ ! -s "$apk" ]] || ! unzip -tq "$apk"; then
-              echo "::error::APK is missing, empty, or has invalid ZIP contents: $apk"
-              exit 1
-            fi
-
-            echo "Reading APK manifest metadata for ABI: $abi"
-            if ! "$AAPT" dump badging "$apk" > "$info" 2> "$info_error"; then
-              echo "aapt failed; retrying with aapt2. Original diagnostic:"
-              cat "$info_error" || true
-              if ! "$AAPT2" dump badging "$apk" > "$info" 2> "$info_error"; then
-                echo "::error::Both aapt and aapt2 failed to read APK metadata for $abi."
-                cat "$info_error" || true
-                exit 1
-              fi
-            fi
-
-            echo "Verifying APK signature for ABI: $abi"
-            if ! "$APK_SIGNER" verify --verbose --print-certs "$apk" > "$signing" 2> "$signing_error"; then
-              echo "::error::APK signature verification failed for $abi."
-              cat "$signing_error" || true
-              cat "$signing" || true
-              exit 1
-            fi
-
-            echo "Validating package ID and version for ABI: $abi"
-            python3 - "$info" "$abi" "$EXPECTED_PROJECT_VERSION" <<'PYAPK'
-          from pathlib import Path
-          import re
-          import sys
-
-          info = Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
-          abi = sys.argv[2]
-          project_version = sys.argv[3]
-          package_lines = [line for line in info.splitlines() if line.startswith('package:')]
-          print('APK package metadata:', package_lines[0] if package_lines else '(no package metadata line)')
-          if not package_lines:
-              raise SystemExit(f'ERROR: aapt output contains no package metadata for {abi}. Full output follows:\n{info}')
-
-          try:
-              base_version_code = int(project_version.rsplit('+', 1)[1])
-          except (IndexError, ValueError):
-              raise SystemExit(f'ERROR: invalid expected project version: {project_version!r}')
-
-          # Flutter adds a per-ABI offset for ABI-split APKs.
-          abi_version_offsets = {
-              'armeabi-v7a': 1000,
-              'arm64-v8a': 2000,
-              'x86_64': 4000,
-          }
-          if abi not in abi_version_offsets:
-              raise SystemExit(f'ERROR: unexpected APK ABI {abi!r}; cannot validate its versionCode.')
-          expected_abi_version_code = str(base_version_code + abi_version_offsets[abi])
-
-          line = package_lines[0]
-          checks = {
-              'applicationId': (r"\bname='([^']+)'", 'iq.madrasati.school'),
-              'versionCode': (r"\bversionCode='([^']+)'", expected_abi_version_code),
-              'versionName': (r"\bversionName='([^']+)'", project_version.split('+', 1)[0]),
-          }
-          print(f'Expected {abi} versionCode: {expected_abi_version_code} (base {base_version_code} + ABI offset {abi_version_offsets[abi]}).')
-          for label, (pattern, expected) in checks.items():
-              match = re.search(pattern, line)
-              actual = match.group(1) if match else '(missing)'
-              if actual != expected:
-                  raise SystemExit(f'ERROR: {abi} APK {label} mismatch: expected {expected!r}, found {actual!r}.')
-          PYAPK
-            cp "$apk" "$RUNNER_TEMP/deliverables/Madrasati-v1.4.5-${abi}-${BUILD_KIND}.apk"
-            cp "$info" "$RUNNER_TEMP/deliverables/"
-            cp "$signing" "$RUNNER_TEMP/deliverables/"
-            bytes="$(stat -c '%s' "$apk")"
-            printf '%s  %s bytes\n' "$abi" "$bytes" | tee -a "$RUNNER_TEMP/madrasati-apk-size-report.txt"
-          done
-          cp "$RUNNER_TEMP/madrasati-apk-size-report.txt" "$RUNNER_TEMP/deliverables/"
-          printf 'Signing mode: %s\nOutput: three architecture-specific APKs (arm64-v8a, armeabi-v7a, x86_64).\n' "$BUILD_KIND" > "$RUNNER_TEMP/madrasati-build-kind.txt"
-          cp "$RUNNER_TEMP/madrasati-build-kind.txt" "$RUNNER_TEMP/deliverables/"
+          flutter build apk --release --no-pub \
+            --dart-define="LIBRARY_OWNER=$LIBRARY_OWNER" \
+            --dart-define="LIBRARY_REPO=$LIBRARY_REPO" \
+            --dart-define="LIBRARY_BRANCH=$LIBRARY_BRANCH" 2>&1 | tee "$RUNNER_TEMP/madrasati-ci-logs/apk-build.log"
+          test -s build/app/outputs/flutter-apk/app-release.apk
+          unzip -tq build/app/outputs/flutter-apk/app-release.apk
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging build/app/outputs/flutter-apk/app-release.apk > "$RUNNER_TEMP/madrasati-apk-info.txt"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs build/app/outputs/flutter-apk/app-release.apk > "$RUNNER_TEMP/madrasati-signing.txt"
+          grep -F "package: name='iq.madrasati.school' versionCode='24' versionName='1.3.9'" "$RUNNER_TEMP/madrasati-apk-info.txt"
 
       - name: Run Android bell regression tests (AGP 9 debug variant)
         shell: bash
@@ -518,12 +397,15 @@ jobs:
             )
           done
 
-      - name: Prepare verified source and dependency lockfile
+      - name: Prepare verified downloads
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/deliverables"
-          cp "$PROJECT_ARCHIVE" "$RUNNER_TEMP/deliverables/madrasati-flutter-v1.4.5.zip"
+          cp "$PROJECT_DIR/build/app/outputs/flutter-apk/app-release.apk" "$RUNNER_TEMP/deliverables/Madrasati-v1.3.9.apk"
+          cp "$PROJECT_ARCHIVE" "$RUNNER_TEMP/deliverables/madrasati-flutter-v1.3.9.zip"
+          cp "$RUNNER_TEMP/madrasati-apk-info.txt" "$RUNNER_TEMP/deliverables/"
+          cp "$RUNNER_TEMP/madrasati-signing.txt" "$RUNNER_TEMP/deliverables/"
           cp "$PROJECT_DIR/pubspec.lock" "$RUNNER_TEMP/deliverables/resolved-pubspec.lock"
 
       - name: Diagnose Maven Central HTTP 429 (only on failure)
@@ -539,12 +421,12 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: madrasati-v1.4.5-failure-logs
+          name: madrasati-v1.3.9-failure-logs
           path: ${{ runner.temp }}/madrasati-ci-logs/
           if-no-files-found: ignore
 
       - uses: actions/upload-artifact@v4
         with:
-          name: madrasati-v1.4.5-android
+          name: madrasati-v1.3.9-android
           path: ${{ runner.temp }}/deliverables/
           if-no-files-found: error
