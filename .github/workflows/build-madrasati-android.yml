@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 55
     env:
-      EXPECTED_PROJECT_VERSION: '1.4.1+32'
+      EXPECTED_PROJECT_VERSION: '1.4.2+33'
       FLUTTER_VERSION: '3.50.0'
       NDK_VERSION: '28.2.13676358'
       LIBRARY_OWNER: ${{ vars.LIBRARY_OWNER || github.repository_owner }}
@@ -60,7 +60,7 @@ jobs:
               raise SystemExit(
                   'ERROR: No ZIP file in repository ROOT. On GitHub open the '
                   'repository > Add file > Upload files, choose '
-                  'madrasati-flutter-v1.4.1.zip, then Commit changes. '
+                  'madrasati-flutter-v1.4.2.zip, then Commit changes. '
                   'Do not unzip it or put it inside a folder.')
           print('ZIP files found:', ', '.join(p.name for p in archives))
           expected_version = os.environ['EXPECTED_PROJECT_VERSION']
@@ -297,6 +297,15 @@ jobs:
           flutter test --no-pub --reporter expanded test/app_navigation_test.dart test/approved_html_look_test.dart \
             2>&1 | tee "$RUNNER_TEMP/madrasati-ci-logs/jadwali-navigation-regression.log"
 
+      - name: Verify Asilati visibility, editor and navigation FIRST
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/madrasati-ci-logs"
+          cd "$PROJECT_DIR"
+          flutter test --no-pub --reporter expanded test/asilati test/qawaemi \
+            2>&1 | tee "$RUNNER_TEMP/madrasati-ci-logs/unified-sections-regression.log"
+
       - name: Check Android Gradle configuration before long tests
         shell: bash
         run: |
@@ -358,7 +367,7 @@ jobs:
           unzip -tq build/app/outputs/flutter-apk/app-release.apk
           "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging build/app/outputs/flutter-apk/app-release.apk > "$RUNNER_TEMP/madrasati-apk-info.txt"
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs build/app/outputs/flutter-apk/app-release.apk > "$RUNNER_TEMP/madrasati-signing.txt"
-          grep -F "package: name='iq.madrasati.school' versionCode='32' versionName='1.4.1'" "$RUNNER_TEMP/madrasati-apk-info.txt"
+          grep -F "package: name='iq.madrasati.school' versionCode='33' versionName='1.4.2'" "$RUNNER_TEMP/madrasati-apk-info.txt"
 
       - name: Run Android bell regression tests (AGP 9 debug variant)
         shell: bash
@@ -415,8 +424,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/deliverables"
-          cp "$PROJECT_DIR/build/app/outputs/flutter-apk/app-release.apk" "$RUNNER_TEMP/deliverables/Madrasati-v1.4.1.apk"
-          cp "$PROJECT_ARCHIVE" "$RUNNER_TEMP/deliverables/madrasati-flutter-v1.4.1.zip"
+          cp "$PROJECT_DIR/build/app/outputs/flutter-apk/app-release.apk" "$RUNNER_TEMP/deliverables/Madrasati-v1.4.2.apk"
+          cp "$PROJECT_ARCHIVE" "$RUNNER_TEMP/deliverables/madrasati-flutter-v1.4.2.zip"
           cp "$RUNNER_TEMP/madrasati-apk-info.txt" "$RUNNER_TEMP/deliverables/"
           cp "$RUNNER_TEMP/madrasati-signing.txt" "$RUNNER_TEMP/deliverables/"
           cp "$PROJECT_DIR/pubspec.lock" "$RUNNER_TEMP/deliverables/resolved-pubspec.lock"
@@ -434,13 +443,13 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: madrasati-v1.4.1-failure-logs
+          name: madrasati-v1.4.2-failure-logs
           path: ${{ runner.temp }}/madrasati-ci-logs/
           if-no-files-found: ignore
 
       - uses: actions/upload-artifact@v4
         with:
-          name: madrasati-v1.4.1-android
+          name: madrasati-v1.4.2-android
           path: ${{ runner.temp }}/deliverables/
           if-no-files-found: error
 
@@ -451,12 +460,12 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: madrasati-v1.4.1-android
+          name: madrasati-v1.4.2-android
           path: artifacts
       - name: Prepare reference images and emulator acceleration
         run: |
           mkdir -p captures
-          unzip -p artifacts/madrasati-flutter-v1.4.1.zip ci/visual_reference.html > reference.html
+          unzip -p artifacts/madrasati-flutter-v1.4.2.zip ci/visual_reference.html > reference.html
           for width in 360 412; do
             google-chrome --headless --disable-gpu --no-sandbox --hide-scrollbars --virtual-time-budget=3000 --window-size="$width,800" --screenshot="captures/reference-$width.png" "file://$PWD/reference.html"
           done
@@ -470,10 +479,10 @@ jobs:
           arch: x86_64
           disable-animations: true
           script: |
-            adb install -r artifacts/Madrasati-v1.4.1.apk
+            adb install -r artifacts/Madrasati-v1.4.2.apk
             adb shell wm density 160
             for width in 360 412; do for mode in no yes; do adb shell wm size "${width}x800"; adb shell cmd uimode night "$mode"; adb shell am force-stop iq.madrasati.school; adb shell monkey -p iq.madrasati.school 1; sleep 6; adb shell pidof iq.madrasati.school || exit 1; adb exec-out screencap -p > "captures/flutter-$width-$mode.png"; done; done
       - uses: actions/upload-artifact@v4
         with:
-          name: madrasati-v1.4.1-screen-comparison
+          name: madrasati-v1.4.2-screen-comparison
           path: captures/
